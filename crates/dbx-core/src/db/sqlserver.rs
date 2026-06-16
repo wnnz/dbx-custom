@@ -1024,6 +1024,22 @@ pub async fn execute_batch_with_max_rows(
                 .map(|result| vec![result]);
         }
     }
+
+    if should_execute_sqlserver_batch_for_affected_rows(sql) {
+        let result = sqlserver_driver_result(client.execute(sql, &[])).await?;
+        return Ok(vec![QueryResult {
+            columns: vec![],
+            column_types: Vec::new(),
+            column_sortables: vec![],
+            rows: vec![],
+            affected_rows: result.rows_affected().iter().sum::<u64>(),
+            execution_time_ms: start.elapsed().as_millis(),
+            truncated: false,
+            session_id: None,
+            has_more: false,
+        }]);
+    }
+
     let stream = sqlserver_driver_result(client.simple_query(sql)).await?;
     let mut results = sqlserver_driver_result(collect_result_sets_limited(stream, start, max_rows)).await?;
 
@@ -1057,6 +1073,23 @@ fn is_transaction_control(sql: &str) -> bool {
         return tokens.get(1).is_some_and(|t| t.eq_ignore_ascii_case("TRANSACTION") || t.eq_ignore_ascii_case("TRAN"));
     }
     false
+}
+
+fn should_execute_sqlserver_batch_for_affected_rows(sql: &str) -> bool {
+    let tokens = first_sql_tokens(sql, 1);
+    tokens.first().is_some_and(|token| {
+        !starts_with_executable_sql_keyword(sql, &["SELECT", "EXEC", "WITH", "TABLE"])
+            && !requires_simple_query_batch(sql)
+            && !is_transaction_control(sql)
+            && token_needs_sqlserver_affected_rows(token)
+    })
+}
+
+fn token_needs_sqlserver_affected_rows(token: &str) -> bool {
+    matches!(
+        token.to_ascii_uppercase().as_str(),
+        "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "CREATE" | "ALTER" | "DROP" | "TRUNCATE"
+    )
 }
 
 fn requires_simple_query_batch(sql: &str) -> bool {
@@ -1176,6 +1209,19 @@ mod tests {
         assert!(!requires_simple_query_batch("ALTER TABLE dbo.t ADD name NVARCHAR(20);"));
         assert!(!requires_simple_query_batch("CREATE TABLE dbo.t(id INT);"));
         assert!(!requires_simple_query_batch("UPDATE dbo.t SET id = 1;"));
+    }
+
+    #[test]
+    fn sqlserver_batch_uses_execute_for_affected_row_statements() {
+        assert!(super::should_execute_sqlserver_batch_for_affected_rows("INSERT INTO dbo.t(id) VALUES (1);"));
+        assert!(super::should_execute_sqlserver_batch_for_affected_rows("-- comment\nUPDATE dbo.t SET name = 'a';"));
+        assert!(super::should_execute_sqlserver_batch_for_affected_rows("CREATE TABLE dbo.t(id INT);"));
+
+        assert!(!super::should_execute_sqlserver_batch_for_affected_rows("SELECT * FROM dbo.t;"));
+        assert!(!super::should_execute_sqlserver_batch_for_affected_rows("EXEC dbo.usp_demo;"));
+        assert!(!super::should_execute_sqlserver_batch_for_affected_rows(
+            "CREATE OR ALTER PROCEDURE dbo.usp_demo AS SELECT 1;"
+        ));
     }
 
     #[test]

@@ -12,6 +12,7 @@ import { useQueryStore } from "@/stores/queryStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTabScroll } from "@/composables/useTabScroll";
 import { useTabDrag } from "@/composables/useTabDrag";
+import { isTauriRuntime } from "@/lib/tauriRuntime";
 import { connectionColor, isConnectionReadonly, tabDisplayTitle, tabTooltipLines } from "@/lib/tabPresentation";
 import { hexToRgba } from "@/lib/color";
 import type { QueryTab } from "@/types/database";
@@ -30,6 +31,7 @@ const emit = defineEmits<{
 const { t } = useI18n();
 const queryStore = useQueryStore();
 const settingsStore = useSettingsStore();
+const isDesktop = isTauriRuntime();
 const tabDrag = useTabDrag((draggedId, targetId, position) => {
   queryStore.reorderTab(draggedId, targetId, position);
 });
@@ -268,6 +270,12 @@ const tabOverflowControlClass = computed(() =>
     : "h-7 w-7 rounded-md border border-border/60 bg-background text-foreground/70 hover:border-border hover:text-foreground",
 );
 
+function startTabTailWindowDrag(event: MouseEvent) {
+  if (!isDesktop || event.button !== 0) return;
+  event.preventDefault();
+  void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => getCurrentWindow().startDragging()).catch(() => {});
+}
+
 function dispatchBeforeTabSwitch(tabId: string) {
   if (tabId === queryStore.activeTabId) return;
   window.dispatchEvent(new CustomEvent("dbx:before-tab-switch", { detail: { tabId, fromTabId: queryStore.activeTabId } }));
@@ -378,7 +386,7 @@ function activateTab(tabId: string) {
             <X class="h-3 w-3" />
           </button>
         </div>
-        <div :class="tabTailDragRegionClass" data-tauri-drag-region />
+        <div :class="tabTailDragRegionClass" @mousedown="startTabTailWindowDrag" />
       </div>
     </div>
     <div v-if="showTabOverflowControls" class="relative z-30 flex shrink-0 items-center">
