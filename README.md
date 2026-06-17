@@ -1,179 +1,172 @@
 # dbx-custom
 
-`dbx-custom` is a personal custom fork of [DBX](https://github.com/t8y2/dbx). DBX is a lightweight cross-platform database manager with desktop, Web/Docker, AI SQL assistant, MCP integration, and broad database support.
+`dbx-custom` 是基于 [DBX](https://github.com/t8y2/dbx) fork 的个人定制版本。DBX 是一个轻量、跨平台的数据库管理工具，支持桌面端、Web/Docker 部署、AI SQL 助手、MCP 集成以及多种数据库连接。
 
-This repository keeps DBX's original capabilities and adds workflow-focused improvements for SQL Server usage, SQL editor behavior, packaging, and entity code generation.
+本仓库在保留 DBX 原有能力的基础上，针对日常 SQL Server 使用、编辑器体验、打包方式和代码生成流程做了一些本地化优化。
 
-简体中文: [README.zh-CN.md](README.zh-CN.md)
+## 与原 DBX 的关系
 
-## Relationship With DBX
+- 上游项目：[t8y2/dbx](https://github.com/t8y2/dbx)
+- 当前仓库：基于 DBX fork 后维护的定制分支
+- 开源协议：继承 DBX 的 [Apache-2.0](LICENSE)
 
-- Upstream project: [t8y2/dbx](https://github.com/t8y2/dbx)
-- This repository: a custom fork maintained on top of DBX
-- License: inherited from DBX, [Apache-2.0](LICENSE)
+感谢 DBX 项目作者和社区贡献者提供了优秀的基础项目。本仓库的大部分架构、功能、界面和跨平台能力都来自 DBX 原项目；这里的改动主要是围绕个人工作流和特定数据库使用场景进行补充。
 
-Thanks to the DBX author and community contributors for building the foundation. Most of the architecture, product experience, UI, and cross-platform database tooling come from the upstream DBX project. Changes in this fork are mainly additions for personal workflow and specific database scenarios.
+## 当前优化内容
 
-## Custom Improvements
+### SQL Server Windows 身份验证
 
-### SQL Server Windows Authentication
+- SQL Server 连接支持 Windows 身份验证。
+- 选择 Windows 登录后，连接窗口不再展示用户名和密码。
+- 提交连接配置和测试连接时会清空用户名、密码，直接使用当前 Windows 用户身份。
 
-- SQL Server connections support Windows authentication.
-- When Windows authentication is selected, the connection dialog hides username and password inputs.
-- Submitted and tested connection configs clear username and password, using the current Windows identity instead.
+### SQL 编辑器选择阴影修复
 
-### SQL Editor Selection Rendering Fix
+- 修复从下向上选择 SQL 文本时，未实际选中的行尾文本也出现阴影的问题。
+- 选中效果只渲染实际选中的文本区域，避免整行阴影误导。
+- 添加了相关单元测试。
 
-- Fixed incorrect selection shadow rendering when selecting SQL text upward from lower lines.
-- Only actually selected text ranges are rendered with selection shadow.
-- Added unit tests for the trimmed CodeMirror selection layer.
+### 表和视图生成实体代码
 
-### Entity Code Generation for Tables and Views
+- 表和视图右键菜单新增“生成实体代码”。
+- 支持在弹框中选择语言和 ORM。
+- 支持复制和保存生成结果。
+- 当前支持：
+  - C#：EF Core、SqlSugar
+  - Java：JPA / Hibernate、MyBatis Plus
+  - TypeScript：TypeORM
+  - Go：GORM
+  - Python：SQLAlchemy
+- 生成代码会尽量包含表名、Schema、字段类型、主键、nullable、字段映射和注释信息。
 
-- Table and view context menus now include `Generate Entity Code`.
-- A dialog lets users select language and ORM.
-- Generated code can be copied or saved.
-- Currently supported:
-  - C#: EF Core, SqlSugar
-  - Java: JPA / Hibernate, MyBatis Plus
-  - TypeScript: TypeORM
-  - Go: GORM
-  - Python: SQLAlchemy
-- Generated code uses table name, schema, column types, primary keys, nullable flags, field mapping, and comments where metadata is available.
+### 更新历史
 
-### Single Portable exe Build Notes
-
-- README now includes the Windows single-file portable exe build command.
-- This is useful when copying `dbx.exe` directly to another machine.
-
-### Update History
-
-Custom update notes are stored in:
+本仓库的定制更新记录保存在：
 
 - [docs/update-history/Feature-20260616.md](docs/update-history/Feature-20260616.md)
 
-## Original DBX Capabilities
+## 原 DBX 核心能力
 
-This fork still inherits DBX's core features:
+本 fork 仍然继承 DBX 的主要能力：
 
-- Supports MySQL, PostgreSQL, SQLite, Redis, MongoDB, DuckDB, ClickHouse, SQL Server, Oracle, Elasticsearch, and many other databases.
-- Query editor with SQL highlighting, autocomplete, formatting, query history, and tabs.
-- Data grid browsing, filtering, sorting, editing, and export.
-- Schema browser, object browser, table structure editor, ER diagram, explain plan, and schema diff.
-- AI SQL assistant and MCP Server.
-- Tauri desktop app, Web version, and Docker self-hosting.
+- 支持 MySQL、PostgreSQL、SQLite、Redis、MongoDB、DuckDB、ClickHouse、SQL Server、Oracle、Elasticsearch 等多种数据库。
+- 支持查询编辑器、SQL 高亮、自动补全、格式化、查询历史和多标签页。
+- 支持表数据浏览、过滤、排序、编辑、导出。
+- 支持 Schema 浏览、对象浏览、表结构编辑、ER 图、执行计划、Schema 对比。
+- 支持 AI SQL 助手和 MCP Server。
+- 支持 Tauri 桌面端、Web 版本和 Docker 自托管。
 
-For the full upstream feature list, see [DBX](https://github.com/t8y2/dbx).
+更完整的功能说明请参考上游项目：[DBX](https://github.com/t8y2/dbx)。
 
-## Requirements
+## 环境要求
 
 - Node.js >= 22.13.0
 - pnpm 10.x
-- Rust toolchain
-- Tauri 2 prerequisites for desktop builds
+- Rust 工具链
+- Windows 构建桌面端时需要具备 Tauri 2 所需环境
 
-If dependency installation needs a proxy, configure one first, for example:
+如果需要安装依赖但网络受限，可以配置代理，例如：
 
 ```powershell
 $env:HTTP_PROXY="http://192.168.125.112:10808"
 $env:HTTPS_PROXY="http://192.168.125.112:10808"
 ```
 
-## Common Commands
+## 常用命令
 
-### Install Dependencies
+### 安装依赖
 
 ```bash
 corepack pnpm install
 ```
 
-### Start Desktop Development
+### 启动桌面端开发模式
 
 ```bash
 corepack pnpm dev:tauri
 ```
 
-### Start Web Frontend
+### 启动 Web 前端
 
 ```bash
 corepack pnpm dev:web
 ```
 
-### Start Web Backend
+### 启动 Web 后端
 
 ```bash
 corepack pnpm dev:backend
 ```
 
-### Type Check
+### 类型检查
 
 ```bash
 corepack pnpm typecheck
 ```
 
-### Run Frontend Tests
+### 运行前端测试
 
 ```bash
 corepack pnpm test
 ```
 
-Run a specific test:
+运行指定测试：
 
 ```bash
 corepack pnpm vitest run apps/desktop/src/lib/__tests__/entityCodeGenerator.spec.ts
 ```
 
-### Format Frontend Code
+### 格式化前端代码
 
 ```bash
 corepack pnpm fmt
 ```
 
-Format a specific file:
+格式化指定文件：
 
 ```bash
 corepack pnpm exec oxfmt apps/desktop/src/components/objects/EntityCodeDialog.vue
 ```
 
-### Rust Check
+### Rust 检查
 
 ```bash
 cargo check
 ```
 
-Skip DuckDB to speed up local checks:
+跳过 DuckDB，加快本地检查：
 
 ```bash
 cargo check --no-default-features
 ```
 
-### Build Installer
+### 构建安装包
 
 ```bash
 corepack pnpm tauri build
 ```
 
-Installer output directory:
+安装包输出目录：
 
 ```text
 src-tauri/target/release/bundle/
 ```
 
-### Build Single Portable exe
+### 构建单文件免安装 exe
 
 ```bash
 corepack pnpm tauri build --no-bundle
 ```
 
-Windows output file:
+Windows 输出文件：
 
 ```text
 src-tauri/target/release/dbx.exe
 ```
 
-If your build log reports `target/release/dbx.exe` from the repository root, follow the actual build output.
+如果你在仓库根目录看到的输出路径是 `target/release/dbx.exe`，以实际构建日志为准。
 
-### Pre-build Checks
+### 构建前完整检查
 
 ```bash
 corepack pnpm typecheck
@@ -181,21 +174,21 @@ corepack pnpm test
 cargo check
 ```
 
-## Tech Stack
+## 技术栈
 
 - Tauri 2
 - Vue 3 + TypeScript
 - shadcn-vue + Tailwind CSS
 - CodeMirror 6
 - Rust
-- sqlx / tiberius / redis-rs / mongodb and other database drivers
+- sqlx / tiberius / redis-rs / mongodb 等数据库驱动
 
-## Acknowledgements
+## 致谢
 
-Thanks to the [DBX](https://github.com/t8y2/dbx) project and its contributors. This fork depends on DBX's substantial engineering work, including the cross-platform desktop app, database connectivity, query editor, data grid, schema tools, AI/MCP integration, and overall product experience.
+感谢 [DBX](https://github.com/t8y2/dbx) 项目及其贡献者。这个 fork 的价值建立在 DBX 已经完成的大量工程工作之上，包括跨平台桌面框架、数据库连接能力、查询编辑器、数据表格、Schema 工具、AI/MCP 集成和整体产品体验。
 
-If this custom version is useful, consider following and supporting the upstream DBX project as well.
+如果这个定制版本对你有帮助，也建议关注和支持原 DBX 项目。
 
-## License
+## 许可证
 
 [Apache-2.0](LICENSE)
