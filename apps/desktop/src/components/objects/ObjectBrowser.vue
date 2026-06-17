@@ -43,8 +43,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import CustomContextMenu, { type ContextMenuItem } from "@/components/ui/CustomContextMenu.vue";
 import DangerConfirmDialog from "@/components/editor/DangerConfirmDialog.vue";
 import ProcedureExecutionDialog from "@/components/objects/ProcedureExecutionDialog.vue";
+import EntityCodeDialog from "@/components/objects/EntityCodeDialog.vue";
 import * as api from "@/lib/api";
-import type { ConnectionConfig, ObjectInfo, ObjectSourceKind } from "@/types/database";
+import type { ColumnInfo, ConnectionConfig, ObjectInfo, ObjectSourceKind } from "@/types/database";
 import { isSchemaAware } from "@/lib/databaseCapabilities";
 import { supportsSchemaDiagram, supportsTableImport, supportsTableStructureEditing, supportsTableTruncate } from "@/lib/databaseFeatureSupport";
 import { connectionUsesDatabaseObjectTreeMode, effectiveDatabaseTypeForConnection, tableStructureDatabaseTypeForConnection } from "@/lib/jdbcDialect";
@@ -68,6 +69,7 @@ import type { SqlFormatDialect } from "@/lib/sqlFormatter";
 import { isCancelSearchShortcut } from "@/lib/keyboardShortcuts";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { buildObjectBrowserRows, filterObjectBrowserRows, formatObjectBrowserTimestamp, initialObjectBrowserSortDirection, sortObjectBrowserRows, type ObjectBrowserRow, type ObjectBrowserSortDirection, type ObjectBrowserSortKey } from "@/lib/objectBrowserRows";
+import type { EntityTableModel } from "@/lib/entityCodeGenerator";
 
 type ObjectFilter = "all" | "tables" | "views" | "procedures" | "functions" | "sequences" | "packages";
 
@@ -129,6 +131,11 @@ const duplicateTarget = ref<ObjectBrowserRow | null>(null);
 const duplicateTableName = ref("");
 const showProcedureExecutionConfirm = ref(false);
 const procedureExecutionTarget = ref<ObjectBrowserRow | null>(null);
+const showEntityCodeDialog = ref(false);
+const entityCodeTitle = ref("");
+const entityCodeTables = ref<EntityTableModel[]>([]);
+const entityCodeError = ref("");
+const entityCodeLoading = ref(false);
 const selectedTableIds = ref<Set<string>>(new Set());
 const expandedPartitionParentIds = ref<Set<string>>(new Set());
 const showBatchDropConfirm = ref(false);
@@ -710,6 +717,35 @@ async function exportStructure(row: ObjectBrowserRow) {
   }
 }
 
+async function generateEntityCodeForRow(row: ObjectBrowserRow) {
+  const schema = row.schema || selectedSchema.value;
+  const schemaForQuery = schema || props.database;
+  entityCodeTitle.value = t("contextMenu.entityCodeTitle", { name: row.name });
+  entityCodeTables.value = [];
+  entityCodeError.value = "";
+  entityCodeLoading.value = true;
+  showEntityCodeDialog.value = true;
+
+  try {
+    await connectionStore.ensureConnected(props.connection.id);
+    const columns = (await api.getColumns(props.connection.id, props.database, schemaForQuery, row.name)) as ColumnInfo[];
+    entityCodeTables.value = [
+      {
+        schema,
+        tableName: row.name,
+        tableComment: row.comment,
+        objectType: row.type === "VIEW" ? "view" : "table",
+        columns,
+      },
+    ];
+  } catch (e: any) {
+    entityCodeError.value = e?.message || String(e);
+    console.error("Generate entity code failed:", e);
+  } finally {
+    entityCodeLoading.value = false;
+  }
+}
+
 async function exportDataLegacy(row: ObjectBrowserRow, format: "json" | "sql") {
   try {
     const schema = row.schema || selectedSchema.value;
@@ -1118,6 +1154,7 @@ function getTableMenuItems(item: ObjectBrowserRow): ContextMenuItem[] {
     exportDataSubmenu(item),
     { label: t("contextMenu.exportDatabase"), action: () => openDatabaseExport(item), icon: Upload },
     { label: t("contextMenu.exportStructure"), action: () => exportStructure(item), icon: FileCode },
+    { label: t("contextMenu.generateEntityCode"), action: () => generateEntityCodeForRow(item), icon: Code2 },
     { label: "", separator: true },
     { label: t("contextMenu.duplicateStructure"), action: () => requestDuplicateStructure(item), icon: CopyPlus },
     { label: "", separator: true },
@@ -1161,6 +1198,7 @@ function getViewMenuItems(item: ObjectBrowserRow): ContextMenuItem[] {
     exportDataSubmenu(item),
     { label: t("contextMenu.exportDatabase"), action: () => openDatabaseExport(item), icon: Upload },
     { label: t("contextMenu.exportStructure"), action: () => exportStructure(item), icon: FileCode },
+    { label: t("contextMenu.generateEntityCode"), action: () => generateEntityCodeForRow(item), icon: Code2 },
     { label: "", separator: true },
     {
       label: t("contextMenu.dropView"),
@@ -1449,6 +1487,8 @@ function getObjectBrowserMenuItems(item: ObjectBrowserRow): ContextMenuItem[] {
     @open-sql="openProcedureExecutionSql"
     @execute="executeProcedureSql"
   />
+
+  <EntityCodeDialog v-model:open="showEntityCodeDialog" :title="entityCodeTitle" :tables="entityCodeTables" :loading="entityCodeLoading" :error="entityCodeError" />
 
   <Dialog v-model:open="showDuplicateDialog">
     <DialogContent class="sm:max-w-[400px]">

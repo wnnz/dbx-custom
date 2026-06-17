@@ -104,6 +104,7 @@ import { supportsDatabaseUserAdmin } from "@/lib/databaseUserAdmin";
 import { sidebarTreeContextKey } from "@/lib/sidebarTreeContext";
 import DangerConfirmDialog from "@/components/editor/DangerConfirmDialog.vue";
 import ProcedureExecutionDialog from "@/components/objects/ProcedureExecutionDialog.vue";
+import EntityCodeDialog from "@/components/objects/EntityCodeDialog.vue";
 import { useExportTracker, type ExportTask } from "@/composables/useExportTracker";
 import { isTauriRuntime } from "@/lib/tauriRuntime";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -119,6 +120,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import LightTooltip from "@/components/ui/LightTooltip.vue";
 import { flattenTree } from "@/composables/useFlatTree";
+import type { EntityTableModel } from "@/lib/entityCodeGenerator";
 
 const { t } = useI18n();
 const labelRef = ref<HTMLElement>();
@@ -1182,13 +1184,18 @@ const showDropTableChildObjectConfirm = ref(false);
 const showBatchDropConfirm = ref(false);
 const showStructurePreviewDialog = ref(false);
 const showStructureDocCopyDialog = ref(false);
+const showEntityCodeDialog = ref(false);
 const structurePreviewSql = ref("");
 const structurePreviewTitle = ref("");
 const structurePreviewDefaultFileName = ref("structure.sql");
 const structurePreviewError = ref("");
 const structureDocCopyText = ref("");
 const structureDocCopyTitle = ref("");
+const entityCodeTitle = ref("");
+const entityCodeTables = ref<EntityTableModel[]>([]);
+const entityCodeError = ref("");
 const isLoadingStructurePreview = ref(false);
+const isLoadingEntityCode = ref(false);
 const showEmptyTableConfirm = ref(false);
 const showTruncateTableConfirm = ref(false);
 const showRenameObjectDialog = ref(false);
@@ -2139,6 +2146,40 @@ function columnDocCells(target: TreeNode, column: ColumnInfo, includeTable: bool
 async function tableColumnsForStructureCopy(target: TreeNode & { connectionId: string; database: string }): Promise<ColumnInfo[]> {
   await connectionStore.ensureConnected(target.connectionId);
   return (await api.getColumns(target.connectionId, target.database, target.schema || target.database, target.label)) as ColumnInfo[];
+}
+
+async function buildEntityCodeTables(): Promise<EntityTableModel[]> {
+  const tables: EntityTableModel[] = [];
+  for (const target of structureExportTargets()) {
+    tables.push({
+      schema: target.schema,
+      tableName: target.label,
+      tableComment: target.comment,
+      objectType: target.type === "view" ? "view" : "table",
+      columns: await tableColumnsForStructureCopy(target),
+    });
+  }
+  return tables;
+}
+
+async function generateEntityCodeForNode() {
+  const targets = structureExportTargets();
+  if (!targets.length) return;
+
+  entityCodeTitle.value = targets.length === 1 ? t("contextMenu.entityCodeTitle", { name: targets[0]!.label }) : t("contextMenu.entityCodeTitleMultiple", { count: targets.length });
+  entityCodeTables.value = [];
+  entityCodeError.value = "";
+  isLoadingEntityCode.value = true;
+  showEntityCodeDialog.value = true;
+
+  try {
+    entityCodeTables.value = await buildEntityCodeTables();
+  } catch (e: any) {
+    entityCodeError.value = e?.message || String(e);
+    console.error("Generate entity code failed:", e);
+  } finally {
+    isLoadingEntityCode.value = false;
+  }
 }
 
 async function buildStructureCopyText(format: StructureCopyFormat): Promise<string> {
@@ -3238,6 +3279,7 @@ function treeItemMenuItems(): ContextMenuItem[] {
     items.push(exportDataSubmenu());
     items.push({ label: t("contextMenu.exportDatabase"), action: openDatabaseExport, icon: Upload });
     items.push({ label: t("contextMenu.exportStructure"), action: exportStructure, icon: FileCode });
+    items.push({ label: t("contextMenu.generateEntityCode"), action: generateEntityCodeForNode, icon: Code2 });
     items.push(copyStructureAsSubmenu());
     if (isTableNotView.value) {
       items.push({ label: "", separator: true });
@@ -3590,6 +3632,8 @@ function treeItemMenuItems(): ContextMenuItem[] {
       </DialogFooter>
     </DialogContent>
   </Dialog>
+
+  <EntityCodeDialog v-model:open="showEntityCodeDialog" :title="entityCodeTitle" :tables="entityCodeTables" :loading="isLoadingEntityCode" :error="entityCodeError" />
 
   <DangerConfirmDialog v-model:open="showDropTableConfirm" :title="t('contextMenu.confirmDropTableTitle')" :message="t('contextMenu.confirmDropTableMessage', { name: node.label })" :sql="dropTablePreviewSql" :confirm-label="t('contextMenu.dropTable')" @confirm="confirmDropTable" />
 
