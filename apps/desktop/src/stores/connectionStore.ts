@@ -461,7 +461,7 @@ export const useConnectionStore = defineStore("connection", () => {
     // When searching, fetch all matching tables (no pagination) — backend filter
     // already narrows the result set, so client-side filtering is not needed.
     const fetchLimit = searchFilter ? undefined : options.pageSize + 1;
-    const tables = await api.listTables(options.node.connectionId, options.node.database, options.querySchema, searchFilter, fetchLimit, searchFilter ? undefined : options.offset);
+    const tables = await api.listTables(options.node.connectionId, options.node.database, options.querySchema, searchFilter, fetchLimit, searchFilter ? undefined : options.offset, options.objectTypes);
     const hasMore = searchFilter ? false : tables.length > options.pageSize;
     const pageTables = hasMore ? tables.slice(0, options.pageSize) : tables;
     const objects = mergeTableInfosIntoObjects([], pageTables, options.effectiveSchema);

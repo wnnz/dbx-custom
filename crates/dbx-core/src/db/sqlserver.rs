@@ -657,6 +657,7 @@ pub async fn list_tables(
     filter: Option<&str>,
     limit: Option<usize>,
     offset: Option<usize>,
+    object_types: Option<&[String]>,
 ) -> Result<Vec<TableInfo>, String> {
     let fetch_clause = limit
         .map(|value| format!(" OFFSET {} ROWS FETCH NEXT {} ROWS ONLY", offset.unwrap_or(0), value.min(1000)))
@@ -667,6 +668,7 @@ pub async fn list_tables(
         .filter(|value| !value.trim().is_empty())
         .map(|value| format!(" AND o.name LIKE '%{}%' ESCAPE '\\' ", escape_like_literal(value.trim())))
         .unwrap_or_default();
+    let type_clause = sqlserver_table_type_clause(object_types);
     let schema_escaped = schema.replace('\'', "''");
     let sql = format!(
         "SELECT o.name, CASE WHEN o.type = 'V' THEN 'VIEW' ELSE 'BASE TABLE' END, \
@@ -677,6 +679,7 @@ pub async fn list_tables(
          WHERE s.name = '{schema_escaped}' \
            AND o.type IN ('U','V') \
            AND o.is_ms_shipped = 0 \
+           {type_clause}\
            {filter_clause}\
          ORDER BY o.name{fetch_clause}"
     );
@@ -692,6 +695,21 @@ pub async fn list_tables(
             parent_name: None,
         })
         .collect())
+}
+
+fn sqlserver_table_type_clause(object_types: Option<&[String]>) -> &'static str {
+    match requested_table_object_types(object_types) {
+        (true, false) => "AND o.type = 'U' ",
+        (false, true) => "AND o.type = 'V' ",
+        _ => "",
+    }
+}
+
+fn requested_table_object_types(object_types: Option<&[String]>) -> (bool, bool) {
+    object_types.unwrap_or_default().iter().fold((false, false), |(has_table, has_view), object_type| {
+        let value = object_type.to_ascii_uppercase();
+        (has_table || value.contains("TABLE"), has_view || value.contains("VIEW"))
+    })
 }
 
 fn escape_like_literal(value: &str) -> String {

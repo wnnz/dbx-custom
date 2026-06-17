@@ -16,6 +16,7 @@ pub struct SchemaQuery {
     pub filter: Option<String>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
+    pub object_types: Option<String>,
     pub object_type: Option<dbx_core::db::ObjectSourceKind>,
 }
 
@@ -42,7 +43,8 @@ pub async fn list_tables(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let database = q.database.as_deref().unwrap_or("");
     let schema = q.schema.as_deref().unwrap_or("");
-    let result = dbx_core::schema::list_tables_core(
+    let object_types = parse_object_types(q.object_types.as_deref());
+    let result = dbx_core::schema::list_tables_core_filtered_by_types(
         &state.app,
         &q.connection_id,
         database,
@@ -50,10 +52,22 @@ pub async fn list_tables(
         q.filter.as_deref(),
         q.limit,
         q.offset,
+        object_types.as_deref(),
     )
     .await
     .map_err(AppError)?;
     Ok(Json(serde_json::to_value(result).map_err(|e| AppError(e.to_string()))?))
+}
+
+fn parse_object_types(value: Option<&str>) -> Option<Vec<String>> {
+    let types: Vec<_> = value
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+        .collect();
+    (!types.is_empty()).then_some(types)
 }
 
 pub async fn list_objects(

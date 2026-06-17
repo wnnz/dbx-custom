@@ -424,8 +424,21 @@ pub async fn list_tables_core(
     limit: Option<usize>,
     offset: Option<usize>,
 ) -> Result<Vec<db::TableInfo>, String> {
+    list_tables_core_filtered_by_types(state, connection_id, database, schema, filter, limit, offset, None).await
+}
+
+pub async fn list_tables_core_filtered_by_types(
+    state: &AppState,
+    connection_id: &str,
+    database: &str,
+    schema: &str,
+    filter: Option<&str>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+    object_types: Option<&[String]>,
+) -> Result<Vec<db::TableInfo>, String> {
     retry_metadata_connection(state, connection_id, Some(database), || {
-        list_tables_once(state, connection_id, database, schema, filter, limit, offset)
+        list_tables_once(state, connection_id, database, schema, filter, limit, offset, object_types)
     })
     .await
 }
@@ -438,6 +451,7 @@ async fn list_tables_once(
     filter: Option<&str>,
     limit: Option<usize>,
     offset: Option<usize>,
+    object_types: Option<&[String]>,
 ) -> Result<Vec<db::TableInfo>, String> {
     let pool_key = state.get_or_create_pool(connection_id, Some(database)).await?;
     #[cfg(feature = "duckdb-bundled")]
@@ -456,7 +470,7 @@ async fn list_tables_once(
             })
             .await
             .map_err(|e| e.to_string())?
-            .map(|tables| filter_table_infos(tables, filter, limit, offset));
+            .map(|tables| filter_table_infos(tables, filter, limit, offset, object_types));
         }
         if let Some(PoolKind::ExternalDriver { config, session, .. }) = connections.get(&pool_key) {
             let config = config.clone();
@@ -468,41 +482,51 @@ async fn list_tables_once(
                     serde_json::json!({ "connection": config.as_ref(), "database": database, "schema": schema }),
                 )
                 .await
-                .map(|tables| filter_table_infos(tables, filter, limit, offset));
+                .map(|tables| filter_table_infos(tables, filter, limit, offset, object_types));
         }
         #[cfg(feature = "duckdb-bundled")]
         if let Some(con) = extract_pool!(&connections, &pool_key, DuckDb) {
             drop(connections);
             let con = con.lock().map_err(|e| e.to_string())?;
             return duckdb_query_tables_in_database_with_attached(&con, database, schema, &duckdb_attached_names)
-                .map(|tables| filter_table_infos(tables, filter, limit, offset));
+                .map(|tables| filter_table_infos(tables, filter, limit, offset, object_types));
         }
         if let Some(client) = extract_pool!(&connections, &pool_key, ClickHouse) {
             drop(connections);
             return db::clickhouse_driver::list_tables(&client, clickhouse_metadata_database(database, schema))
                 .await
-                .map(|tables| filter_table_infos(tables, filter, limit, offset));
+                .map(|tables| filter_table_infos(tables, filter, limit, offset, object_types));
         }
         if let Some(client) = extract_pool!(&connections, &pool_key, InfluxDb) {
             drop(connections);
             return db::influxdb_driver::list_tables(&client, database)
                 .await
-                .map(|tables| filter_table_infos(tables, filter, limit, offset));
+                .map(|tables| filter_table_infos(tables, filter, limit, offset, object_types));
         }
-        try_sqlserver!(connections, &pool_key, list_tables, schema, filter, limit, offset);
+        try_sqlserver!(connections, &pool_key, list_tables, schema, filter, limit, offset, object_types);
         if let Some(client) = extract_pool!(&connections, &pool_key, Agent) {
             let fallback_config = db_config.clone();
             drop(connections);
             let mut client = client.lock().await;
             match client.list_tables::<Vec<db::TableInfo>>(database, schema).await {
-                Ok(tables) if !tables.is_empty() => return Ok(filter_table_infos(tables, filter, limit, offset)),
+                Ok(tables) if !tables.is_empty() => {
+                    return Ok(filter_table_infos(tables, filter, limit, offset, object_types));
+                }
                 Ok(tables) => {
                     if let Some(config) = fallback_config.as_ref() {
                         match native_postgres_metadata_pool(state, connection_id, database, config).await {
                             Ok(Some(pool)) => {
-                                return db::postgres::list_tables_filtered(&pool, schema, filter, limit, offset).await;
+                                return db::postgres::list_tables_filtered_by_types(
+                                    &pool,
+                                    schema,
+                                    filter,
+                                    limit,
+                                    offset,
+                                    object_types,
+                                )
+                                .await;
                             }
-                            Ok(None) => return Ok(filter_table_infos(tables, filter, limit, offset)),
+                            Ok(None) => return Ok(filter_table_infos(tables, filter, limit, offset, object_types)),
                             Err(error) => {
                                 log::warn!(
                                     "[schema][agent:list_tables:fallback-failed] connection_id={} database={} schema={} error={}",
@@ -514,20 +538,25 @@ async fn list_tables_once(
                             }
                         }
                     }
-                    return Ok(filter_table_infos(tables, filter, limit, offset));
+                    return Ok(filter_table_infos(tables, filter, limit, offset, object_types));
                 }
                 Err(agent_error) => {
                     if let Some(config) = fallback_config.as_ref() {
                         if let Some(pool) =
                             native_postgres_metadata_pool(state, connection_id, database, config).await?
                         {
-                            return db::postgres::list_tables_filtered(&pool, schema, filter, limit, offset)
-                                .await
-                                .map_err(|fallback_error| {
-                                    format!(
-                                        "{agent_error}\n\nNative PostgreSQL metadata fallback failed: {fallback_error}"
-                                    )
-                                });
+                            return db::postgres::list_tables_filtered_by_types(
+                                &pool,
+                                schema,
+                                filter,
+                                limit,
+                                offset,
+                                object_types,
+                            )
+                            .await
+                            .map_err(|fallback_error| {
+                                format!("{agent_error}\n\nNative PostgreSQL metadata fallback failed: {fallback_error}")
+                            });
                         }
                     }
                     return Err(agent_error);
@@ -543,30 +572,34 @@ async fn list_tables_once(
         PoolKind::Mysql(p, _) if db_config.as_ref().is_some_and(is_doris_family_config) => {
             db::mysql::list_tables_show(p, database)
                 .await
-                .map(|tables| filter_table_infos(tables, filter, limit, offset))
+                .map(|tables| filter_table_infos(tables, filter, limit, offset, object_types))
         }
         PoolKind::Mysql(p, mode) => {
             dispatch_mysql!(p, mode, db::mysql::list_tables, db::ob_oracle::list_tables, schema)
-                .map(|tables| filter_table_infos(tables, filter, limit, offset))
+                .map(|tables| filter_table_infos(tables, filter, limit, offset, object_types))
         }
         PoolKind::Postgres(p) if db_config.as_ref().is_some_and(is_questdb_config) => {
-            db::questdb::list_tables(p, schema).await.map(|tables| filter_table_infos(tables, filter, limit, offset))
+            db::questdb::list_tables(p, schema)
+                .await
+                .map(|tables| filter_table_infos(tables, filter, limit, offset, object_types))
         }
-        PoolKind::Postgres(p) => db::postgres::list_tables_filtered(p, schema, filter, limit, offset).await,
-        PoolKind::Sqlite(p) => {
-            db::sqlite::list_tables(p, schema).await.map(|tables| filter_table_infos(tables, filter, limit, offset))
+        PoolKind::Postgres(p) => {
+            db::postgres::list_tables_filtered_by_types(p, schema, filter, limit, offset, object_types).await
         }
+        PoolKind::Sqlite(p) => db::sqlite::list_tables(p, schema)
+            .await
+            .map(|tables| filter_table_infos(tables, filter, limit, offset, object_types)),
         PoolKind::Rqlite(client) => db::rqlite_driver::list_tables(client, schema)
             .await
-            .map(|tables| filter_table_infos(tables, filter, limit, offset)),
+            .map(|tables| filter_table_infos(tables, filter, limit, offset, object_types)),
         PoolKind::MongoDb(client) => db::mongo_driver::list_collections(client, database)
             .await
             .map(|names| collection_names_to_tables(names, "COLLECTION"))
-            .map(|tables| filter_table_infos(tables, filter, limit, offset)),
+            .map(|tables| filter_table_infos(tables, filter, limit, offset, object_types)),
         PoolKind::Elasticsearch(client) => db::elasticsearch_driver::list_indices(client)
             .await
             .map(|names| collection_names_to_tables(names, "INDEX"))
-            .map(|tables| filter_table_infos(tables, filter, limit, offset)),
+            .map(|tables| filter_table_infos(tables, filter, limit, offset, object_types)),
         _ => Ok(vec![]),
     }
 }
@@ -589,16 +622,51 @@ fn filter_table_infos(
     filter: Option<&str>,
     limit: Option<usize>,
     offset: Option<usize>,
+    object_types: Option<&[String]>,
 ) -> Vec<db::TableInfo> {
     let filter = filter.unwrap_or("").to_lowercase();
     let limit = limit.unwrap_or(usize::MAX);
     let offset = offset.unwrap_or(0);
+    let normalized_object_types = normalized_table_object_types(object_types);
     tables
         .into_iter()
         .filter(|table| filter.is_empty() || table.name.to_lowercase().contains(&filter))
+        .filter(|table| {
+            normalized_object_types
+                .as_ref()
+                .map_or(true, |types| types.iter().any(|kind| *kind == normalize_table_object_type(&table.table_type)))
+        })
         .skip(offset)
         .take(limit)
         .collect()
+}
+
+fn normalized_table_object_types(object_types: Option<&[String]>) -> Option<Vec<&'static str>> {
+    let types: Vec<_> = object_types
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|value| normalize_requested_table_object_type(value))
+        .collect();
+    (!types.is_empty()).then_some(types)
+}
+
+fn normalize_requested_table_object_type(object_type: &str) -> Option<&'static str> {
+    let value = object_type.to_ascii_uppercase();
+    if value.contains("VIEW") {
+        Some("VIEW")
+    } else if value.contains("TABLE") {
+        Some("TABLE")
+    } else {
+        None
+    }
+}
+
+fn normalize_table_object_type(table_type: &str) -> &'static str {
+    if table_type.to_ascii_uppercase().contains("VIEW") {
+        "VIEW"
+    } else {
+        "TABLE"
+    }
 }
 
 #[cfg(test)]
@@ -674,9 +742,13 @@ mod tests {
     }
 
     fn test_table_info(name: &str) -> super::db::TableInfo {
+        test_table_info_with_type(name, "BASE TABLE")
+    }
+
+    fn test_table_info_with_type(name: &str, table_type: &str) -> super::db::TableInfo {
         super::db::TableInfo {
             name: name.to_string(),
-            table_type: "BASE TABLE".to_string(),
+            table_type: table_type.to_string(),
             comment: None,
             parent_schema: None,
             parent_name: None,
@@ -739,10 +811,26 @@ mod tests {
             test_table_info("users"),
         ];
 
-        let filtered = filter_table_infos(tables, Some("audit"), Some(1), Some(1));
+        let filtered = filter_table_infos(tables, Some("audit"), Some(1), Some(1), None);
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "audit_record");
+    }
+
+    #[test]
+    fn filter_table_infos_applies_object_type_before_offset_and_limit() {
+        let tables = vec![
+            test_table_info_with_type("alpha", "BASE TABLE"),
+            test_table_info_with_type("beta", "BASE TABLE"),
+            test_table_info_with_type("active_users", "VIEW"),
+            test_table_info_with_type("audit_users", "VIEW"),
+        ];
+        let object_types = vec!["VIEW".to_string()];
+
+        let filtered = filter_table_infos(tables, None, Some(1), Some(0), Some(&object_types));
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "active_users");
     }
 
     #[cfg(feature = "duckdb-bundled")]

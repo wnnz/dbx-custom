@@ -30,9 +30,19 @@ pub async fn list_tables(
     filter: Option<String>,
     limit: Option<usize>,
     offset: Option<usize>,
+    object_types: Option<Vec<String>>,
 ) -> Result<Vec<db::TableInfo>, String> {
-    dbx_core::schema::list_tables_core(&state, &connection_id, &database, &schema, filter.as_deref(), limit, offset)
-        .await
+    dbx_core::schema::list_tables_core_filtered_by_types(
+        &state,
+        &connection_id,
+        &database,
+        &schema,
+        filter.as_deref(),
+        limit,
+        offset,
+        object_types.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]

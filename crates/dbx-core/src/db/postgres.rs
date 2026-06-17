@@ -1223,14 +1223,26 @@ pub async fn list_tables_filtered(
     limit: Option<usize>,
     offset: Option<usize>,
 ) -> Result<Vec<TableInfo>, String> {
+    list_tables_filtered_by_types(pool, schema, filter, limit, offset, None).await
+}
+
+pub async fn list_tables_filtered_by_types(
+    pool: &Pool,
+    schema: &str,
+    filter: Option<&str>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+    object_types: Option<&[String]>,
+) -> Result<Vec<TableInfo>, String> {
     let schema = if schema.is_empty() { "public" } else { schema };
     let filter_pattern = like_contains_pattern(filter.unwrap_or("").trim());
     let limit_param = limit.and_then(|value| i64::try_from(value).ok());
     let offset_param = offset.and_then(|value| i64::try_from(value).ok()).unwrap_or(0);
+    let relkinds = postgres_table_relkinds(object_types);
     let client = pool.get().await.map_err(|e| e.to_string())?;
     let stmt = client.prepare_cached(postgres_tables_sql()).await.map_err(|e| e.to_string())?;
     let rows = client
-        .query(&stmt, &[&schema, &filter_pattern, &limit_param, &offset_param])
+        .query(&stmt, &[&schema, &filter_pattern, &limit_param, &offset_param, &relkinds])
         .await
         .map_err(|e| e.to_string())?;
 
@@ -1261,8 +1273,25 @@ fn postgres_tables_sql() -> &'static str {
          LEFT JOIN pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace \
          WHERE n.nspname = $1 AND c.relkind IN ('r','v','m','f','p') \
            AND ($2 = '%%' OR c.relname ILIKE $2 ESCAPE '\\') \
+           AND ($5::text[] IS NULL OR c.relkind = ANY($5::text[])) \
          ORDER BY c.relname \
          LIMIT $3 OFFSET $4"
+}
+
+fn postgres_table_relkinds(object_types: Option<&[String]>) -> Option<Vec<String>> {
+    let (has_table, has_view) = requested_table_object_types(object_types);
+    match (has_table, has_view) {
+        (true, false) => Some(vec!["r".to_string(), "f".to_string(), "p".to_string()]),
+        (false, true) => Some(vec!["v".to_string(), "m".to_string()]),
+        _ => None,
+    }
+}
+
+fn requested_table_object_types(object_types: Option<&[String]>) -> (bool, bool) {
+    object_types.unwrap_or_default().iter().fold((false, false), |(has_table, has_view), object_type| {
+        let value = object_type.to_ascii_uppercase();
+        (has_table || value.contains("TABLE"), has_view || value.contains("VIEW"))
+    })
 }
 
 fn like_contains_pattern(value: &str) -> String {
