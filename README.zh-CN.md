@@ -281,6 +281,14 @@ pnpm tauri build
 
 安装包输出在 `src-tauri/target/release/bundle/` 目录。
 
+如需生成单文件免安装 exe：
+
+```bash
+pnpm tauri build --no-bundle
+```
+
+Windows 下输出文件为 `target/release/dbx.exe`。
+
 ## 技术栈
 
 | 层级   | 技术                                                                                                                                                                                                             |

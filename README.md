@@ -285,6 +285,14 @@ pnpm tauri build
 
 The installer will be in `src-tauri/target/release/bundle/`.
 
+To build a single portable exe without an installer:
+
+```bash
+pnpm tauri build --no-bundle
+```
+
+On Windows, the output file is `target/release/dbx.exe`.
+
 ## Tech Stack
 
 | Layer     | Technology                                                                                                                                                                                                       |

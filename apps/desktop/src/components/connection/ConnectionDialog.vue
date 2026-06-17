@@ -1042,6 +1042,16 @@ watch(customDriverName, (value) => {
   }
 });
 
+function usesSqlServerWindowsAuth(config: Pick<ConnectionConfig, "db_type" | "sqlserver_auth_method">): boolean {
+  return config.db_type === "sqlserver" && config.sqlserver_auth_method === "windows";
+}
+
+function applySqlServerWindowsIntegratedAuth(config: Pick<ConnectionConfig, "db_type" | "sqlserver_auth_method" | "username" | "password">) {
+  if (!usesSqlServerWindowsAuth(config)) return;
+  config.username = "";
+  config.password = "";
+}
+
 async function testConnection() {
   if (!ensureConnectionHostResolvedFromUrl()) return;
 
@@ -1124,6 +1134,7 @@ function connectionConfigForSubmit(id: string): ConnectionConfig {
   }
   if (config.db_type === "sqlserver") {
     config.sqlserver_auth_method = config.sqlserver_auth_method === "windows" ? "windows" : "sqlserver";
+    applySqlServerWindowsIntegratedAuth(config);
   } else {
     config.sqlserver_auth_method = undefined;
   }
@@ -1263,11 +1274,13 @@ function connectionConfigForSubmit(id: string): ConnectionConfig {
 }
 
 function connectionConfigSnapshotForVisibleDatabases(): ConnectionConfig {
-  return {
+  const config = {
     ...(form.value as ConnectionConfig),
     id: editingId.value || "draft",
     visible_databases: form.value.visible_databases,
   };
+  applySqlServerWindowsIntegratedAuth(config);
+  return config;
 }
 
 function getUrlParam(params: string | undefined, key: string): string {
@@ -2665,15 +2678,17 @@ function openExternalUrl(url: string) {
                     </Select>
                   </div>
 
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ form.db_type === "sqlserver" && form.sqlserver_auth_method === "windows" ? t("connection.windowsUser") : t("connection.user") }}</Label>
-                    <Input v-model="form.username" class="col-span-3" :placeholder="form.db_type === 'sqlserver' && form.sqlserver_auth_method === 'windows' ? t('connection.currentWindowsUser') : ''" />
-                  </div>
+                  <template v-if="!usesSqlServerWindowsAuth(form)">
+                    <div class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right">{{ t("connection.user") }}</Label>
+                      <Input v-model="form.username" class="col-span-3" />
+                    </div>
 
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.password") }}</Label>
-                    <PasswordInput v-model="form.password" class="col-span-3" :placeholder="form.db_type === 'sqlserver' && form.sqlserver_auth_method === 'windows' ? t('connection.currentWindowsUserPassword') : ''" />
-                  </div>
+                    <div class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right">{{ t("connection.password") }}</Label>
+                      <PasswordInput v-model="form.password" class="col-span-3" />
+                    </div>
+                  </template>
 
                   <div class="grid grid-cols-4 items-center gap-4">
                     <Label class="text-right">{{ databaseLabel }}</Label>
