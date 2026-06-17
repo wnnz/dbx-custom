@@ -100,6 +100,11 @@ function markerRectsForLineRange(view: EditorView, from: number, to: number, lin
   return rects;
 }
 
+export function shouldRenderTrimmedSelectionLineRange(from: number, to: number, lineFrom: number, lineTo: number, endPos: number): boolean {
+  if (from < to) return true;
+  return lineFrom === lineTo && endPos > lineTo;
+}
+
 function coversX(rect: TrimmedSelectionRect | undefined, x: number): boolean {
   if (!rect) return false;
   return rect.left <= x + CORNER_COVERAGE_GAP && rect.left + rect.width >= x - CORNER_COVERAGE_GAP;
@@ -143,7 +148,9 @@ export function trimmedSelectionLayer() {
             const line = view.state.doc.lineAt(pos);
             const from = Math.max(pos, line.from);
             const to = Math.min(endPos, line.to);
-            rects.push(...markerRectsForLineRange(view, from, to, line.from, line.to, base));
+            if (shouldRenderTrimmedSelectionLineRange(from, to, line.from, line.to, endPos)) {
+              rects.push(...markerRectsForLineRange(view, from, to, line.from, line.to, base));
+            }
 
             const next = line.to + 1;
             if (next <= pos) break;
