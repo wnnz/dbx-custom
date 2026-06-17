@@ -137,11 +137,13 @@ export function useNavigationTargets(dialogs: { showFieldLineageDialog: { value:
 
   async function onStructureEditorSaved(reloadData: () => Promise<void>, toast: (msg: string, duration?: number) => void, context: { connectionId: string; database: string; schema?: string; tableName: string }, commentChanged?: boolean) {
     if (!context.tableName) {
+      connectionStore.invalidateCompletionCache(context.connectionId, context.database);
       try {
         await connectionStore.refreshObjectListTreeNode(context.connectionId, context.database, context.schema || undefined);
       } catch {}
       return;
     }
+    connectionStore.invalidateTableCompletionCache(context.connectionId, context.database, context.tableName, context.schema);
     if (commentChanged) {
       try {
         await connectionStore.refreshObjectListTreeNode(context.connectionId, context.database, context.schema || undefined);

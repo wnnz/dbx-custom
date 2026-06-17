@@ -27,3 +27,27 @@ describe("sqlCompletion quoted schema qualifiers", () => {
     expect(items.some((item) => item.label === "shipments" && item.type === "table")).toBe(true);
   });
 });
+
+describe("sqlCompletion where clause columns", () => {
+  it("suggests referenced table columns after WHERE", () => {
+    const sql = "select * from BusinessUnit where depar";
+    const items = buildSqlCompletionItems(sql, sql.length, {
+      dialect: "sqlserver",
+      tables: [{ name: "BusinessUnit", type: "table" }],
+      columnsByTable: new Map([
+        [
+          "BusinessUnit",
+          [
+            {
+              name: "departmentId",
+              table: "BusinessUnit",
+              dataType: "int",
+            },
+          ],
+        ],
+      ]),
+    });
+
+    expect(items.some((item) => item.label === "departmentId" && item.type === "column")).toBe(true);
+  });
+});

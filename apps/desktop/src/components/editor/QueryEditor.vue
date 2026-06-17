@@ -458,6 +458,10 @@ function completionCacheKey(table: { name: string; schema?: string | null }) {
   return schema ? `${schema}.${table.name}` : table.name;
 }
 
+function referencedTableCompletionCacheKey(table: { name: string; schema?: string | null }) {
+  return table.schema ? `${table.schema}.${table.name}` : table.name;
+}
+
 function supportsDatabaseQualifierCompletion(): boolean {
   return !!props.databaseType && !isSchemaAware(props.databaseType) && !isSingleDatabase(props.databaseType);
 }
@@ -519,6 +523,16 @@ async function ensureForeignKeysForTables(tables: Array<{ name: string; schema?:
     return true;
   });
   await Promise.all(uniqueTables.map((table) => ensureForeignKeysForTable(table)));
+}
+
+function shouldAwaitReferencedColumnCompletion(completionContext: ReturnType<typeof getSqlCompletionContext>) {
+  if (!completionContext.suggestColumns || completionContext.referencedTables.length === 0) return false;
+  return completionContext.referencedTables.some((table) => {
+    if (table.columns && table.columns.length > 0) return false;
+    const referencedKey = referencedTableCompletionCacheKey(table);
+    const metadataKey = completionCacheKey(table);
+    return !cachedColumnsByTable.has(referencedKey) && !cachedColumnsByTable.has(metadataKey) && !!completionMetadataTarget(table);
+  });
 }
 
 function createHoverDom(title: string, detail: string, rows: string[] = []) {
@@ -875,6 +889,12 @@ let completionEpoch = 0;
 let completionDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 type QueryCompletionItem = SqlCompletionItem | ElasticsearchCompletionItem;
+type CompletionCacheInvalidationPayload = {
+  connectionId: string;
+  database?: string;
+  schema?: string;
+  tableName?: string;
+};
 
 function buildCompletionResult(items: QueryCompletionItem[], from: number, validFor?: RegExp) {
   if (items.length === 0) return null;
@@ -1020,6 +1040,27 @@ async function provideSqlCompletions(currentState: import("@codemirror/state").E
 
     const localResult = buildLocalSqlCompletionResult(completionContext, fullDoc, position);
     if (localResult) {
+      if (!explicit && shouldAwaitReferencedColumnCompletion(completionContext)) {
+        if (completionDebounceTimer) {
+          clearTimeout(completionDebounceTimer);
+          completionDebounceTimer = null;
+        }
+        return new Promise<ReturnType<typeof buildCompletionResult>>((resolve) => {
+          completionDebounceTimer = setTimeout(async () => {
+            completionDebounceTimer = null;
+            if (epoch !== completionEpoch) {
+              resolve(null);
+              return;
+            }
+            try {
+              const result = await performAsyncCompletionWithResult(epoch, completionContext, fullDoc, position);
+              resolve(result);
+            } catch {
+              resolve(null);
+            }
+          }, 150);
+        });
+      }
       scheduleCompletionMetadataRefresh(completionContext);
       if (!explicit) return localResult;
     }
@@ -1472,6 +1513,46 @@ async function refreshCompletionCache() {
   cachedCompletionObjects = [];
   cachedColumnsByTable.clear();
   cachedForeignKeysByTable.clear();
+}
+
+function localCompletionTableKeyMatches(key: string, tableName: string, schema?: string): boolean {
+  const parts = key.split(".");
+  const keyTable = parts.pop() ?? "";
+  const keySchema = parts.join(".");
+  if (keyTable.toLowerCase() !== tableName.toLowerCase()) return false;
+  return !schema || !keySchema || keySchema.toLowerCase() === schema.toLowerCase();
+}
+
+function refreshCompletionCacheForTable(tableName: string, schema?: string) {
+  for (const key of cachedColumnsByTable.keys()) {
+    if (localCompletionTableKeyMatches(key, tableName, schema)) cachedColumnsByTable.delete(key);
+  }
+  for (const key of cachedForeignKeysByTable.keys()) {
+    if (localCompletionTableKeyMatches(key, tableName, schema)) cachedForeignKeysByTable.delete(key);
+  }
+}
+
+function shouldApplyCompletionCacheInvalidation(invalidation: CompletionCacheInvalidationPayload | null): invalidation is CompletionCacheInvalidationPayload {
+  if (!invalidation || !props.connectionId || invalidation.connectionId !== props.connectionId) return false;
+  return !invalidation.database || props.database == null || invalidation.database === props.database;
+}
+
+function applyCompletionCacheInvalidation(invalidation: CompletionCacheInvalidationPayload) {
+  completionEpoch++;
+  if (completionDebounceTimer) {
+    clearTimeout(completionDebounceTimer);
+    completionDebounceTimer = null;
+  }
+  if (invalidation.tableName) {
+    refreshCompletionCacheForTable(invalidation.tableName, invalidation.schema);
+  } else {
+    void refreshCompletionCache();
+  }
+  setSemanticDiagnostics([]);
+  scheduleSemanticDiagnostics();
+  if (view.value && codeMirrorCompletionStatus?.(view.value.state) === "active") {
+    codeMirrorStartCompletion?.(view.value);
+  }
 }
 
 onMounted(async () => {
@@ -1940,6 +2021,14 @@ watch(
     refreshCompletionCache();
     setSemanticDiagnostics([]);
     scheduleSemanticDiagnostics();
+  },
+);
+
+watch(
+  () => connectionStore.completionCacheInvalidation,
+  (invalidation) => {
+    if (!shouldApplyCompletionCacheInvalidation(invalidation)) return;
+    applyCompletionCacheInvalidation(invalidation);
   },
 );
 

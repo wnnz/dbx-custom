@@ -14,48 +14,17 @@
 
 ## 当前优化内容
 
-### SQL Server Windows 身份验证
-
-- SQL Server 连接支持 Windows 身份验证。
-- 选择 Windows 登录后，连接窗口不再展示用户名和密码。
-- 提交连接配置和测试连接时会清空用户名、密码，直接使用当前 Windows 用户身份。
-
-### SQL 编辑器选择阴影修复
-
-- 修复从下向上选择 SQL 文本时，未实际选中的行尾文本也出现阴影的问题。
-- 选中效果只渲染实际选中的文本区域，避免整行阴影误导。
-- 添加了相关单元测试。
-
-### 执行结果历史
-
-- 多次执行 SQL 时，结果区默认只展示最后一批执行结果。
-- 结果集页签左侧新增“执行历史”入口。
-- 执行历史下拉展示最近 5 批执行结果，支持切换查看历史结果。
-- 每批内部仍保留多个结果集的“结果 1 / 结果 2 ...”页签。
-
-### SQL Server 影响行统计修复
-
-- 修复 SQL Server 执行 INSERT、UPDATE、DELETE 等 SQL 后，影响行数一直显示为 0 的问题。
-- 执行结果中的返回行数和影响行数会按实际执行结果更新。
-- 适用于执行多语句或写入语句后需要确认影响行数的场景。
-
-### 表和视图生成实体代码
-
-- 表和视图右键菜单新增“生成实体代码”。
-- 支持在弹框中选择语言和 ORM。
-- 支持复制和保存生成结果。
-- 当前支持：
-  - C#：EF Core、SqlSugar
-  - Java：JPA / Hibernate、MyBatis Plus
-  - TypeScript：TypeORM
-  - Go：GORM
-  - Python：SQLAlchemy
-- 生成代码会尽量包含表名、Schema、字段类型、主键、nullable、字段映射和注释信息。
+- SQL Server：支持 Windows 身份验证，并修复影响行数统计异常。
+- SQL 编辑器：修复选中文本阴影异常。
+- SQL 补全：修复 `WHERE` 后字段提示异常，并在表结构变更后刷新字段补全缓存。
+- 执行结果：支持查看最近 5 批执行历史，默认展示最后一批结果。
+- 表和视图：支持右键生成实体代码，覆盖 C#、Java、TypeScript、Go、Python 等常用语言和 ORM。
 
 ### 更新历史
 
 本仓库的定制更新记录保存在：
 
+- [docs/update-history/Feature-20260617.md](docs/update-history/Feature-20260617.md)
 - [docs/update-history/Feature-20260616.md](docs/update-history/Feature-20260616.md)
 
 ## 原 DBX 核心能力

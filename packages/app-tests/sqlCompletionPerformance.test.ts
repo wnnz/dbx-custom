@@ -3,7 +3,7 @@ import { test } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { buildSqlCompletionItems, recordCompletionSelection } from "../../apps/desktop/src/lib/sqlCompletion.ts";
 import { useConnectionStore } from "../../apps/desktop/src/stores/connectionStore.ts";
-import type { ConnectionConfig, TableInfo } from "../../apps/desktop/src/types/database.ts";
+import type { ColumnInfo, ConnectionConfig, TableInfo } from "../../apps/desktop/src/types/database.ts";
 
 function installMemoryStorage() {
   const values = new Map<string, string>();
@@ -130,6 +130,90 @@ test("completion metadata refresh is deduplicated and local lookups rank the cur
     const localTables = store.lookupLocalCompletionTables("conn-large", "app", "customer", 5, "schema_011");
     assert.equal(localTables.length, 5);
     assert.equal(localTables[0].schema, "schema_011");
+  } finally {
+    globalThis.fetch = originalFetch;
+    storage.restore();
+  }
+});
+
+test("table completion invalidation clears only the selected table columns", async () => {
+  const originalFetch = globalThis.fetch;
+  const storage = installMemoryStorage();
+  const columnsByTable = new Map<string, ColumnInfo[]>([
+    [
+      "customers",
+      [
+        {
+          name: "id",
+          data_type: "int",
+          is_nullable: false,
+          column_default: null,
+          is_primary_key: true,
+          extra: null,
+        },
+      ],
+    ],
+    [
+      "orders",
+      [
+        {
+          name: "order_id",
+          data_type: "int",
+          is_nullable: false,
+          column_default: null,
+          is_primary_key: true,
+          extra: null,
+        },
+      ],
+    ],
+  ]);
+  const columnCalls = new Map<string, number>();
+
+  globalThis.fetch = (async (input) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname === "/api/schema/columns") {
+      const table = url.searchParams.get("table") ?? "";
+      columnCalls.set(table, (columnCalls.get(table) ?? 0) + 1);
+      return Response.json(columnsByTable.get(table) ?? []);
+    }
+    return Response.json(null);
+  }) as typeof fetch;
+
+  try {
+    setActivePinia(createPinia());
+    const store = useConnectionStore();
+    store.addEphemeralConnection(postgresConnection());
+
+    await store.listCompletionColumns("conn-large", "app", "customers", "public");
+    await store.listCompletionColumns("conn-large", "app", "orders", "public");
+
+    assert.equal(store.lookupLocalCompletionColumns("conn-large", "app", "customers", "public").length, 1);
+    assert.equal(store.lookupLocalCompletionColumns("conn-large", "app", "orders", "public").length, 1);
+
+    store.invalidateTableCompletionCache("conn-large", "app", "customers", "public");
+
+    assert.equal(store.lookupLocalCompletionColumns("conn-large", "app", "customers", "public").length, 0);
+    assert.equal(store.lookupLocalCompletionColumns("conn-large", "app", "orders", "public").length, 1);
+
+    columnsByTable.set("customers", [
+      {
+        name: "customer_code",
+        data_type: "varchar",
+        is_nullable: true,
+        column_default: null,
+        is_primary_key: false,
+        extra: null,
+      },
+    ]);
+
+    const refreshed = await store.listCompletionColumns("conn-large", "app", "customers", "public");
+
+    assert.deepEqual(
+      refreshed.map((column) => column.name),
+      ["customer_code"],
+    );
+    assert.equal(columnCalls.get("customers"), 2);
+    assert.equal(columnCalls.get("orders"), 1);
   } finally {
     globalThis.fetch = originalFetch;
     storage.restore();

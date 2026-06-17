@@ -115,8 +115,10 @@ export function useSqlExecution(deps: {
     if (success) {
       const refreshTarget = sqlMetadataRefreshTarget(sql, tab.schema);
       if (refreshTarget.scope === "connection") {
+        connectionStore.invalidateCompletionCache(tab.connectionId);
         await connectionStore.loadDatabases(tab.connectionId, { force: true });
       } else if (refreshTarget.scope === "database") {
+        connectionStore.invalidateCompletionCache(tab.connectionId, tab.database);
         await connectionStore.refreshObjectListTreeNode(tab.connectionId, tab.database, refreshTarget.schema);
       }
     }

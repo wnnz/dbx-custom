@@ -69,6 +69,14 @@ interface LoadTreeOptions {
   force?: boolean;
 }
 
+interface CompletionCacheInvalidation {
+  sequence: number;
+  connectionId: string;
+  database?: string;
+  schema?: string;
+  tableName?: string;
+}
+
 interface PersistedTreeChildrenLoadResult {
   hit: boolean;
   isStale: boolean;
@@ -109,6 +117,7 @@ export const useConnectionStore = defineStore("connection", () => {
   const completionDatabasesCache = ref<Record<string, string[]>>({});
   const elasticsearchCompletionIndicesCache = ref<Record<string, string[]>>({});
   const schemaListCache = ref<Record<string, string[]>>({});
+  const completionCacheInvalidation = ref<CompletionCacheInvalidation | null>(null);
   const sidebarSearchQuery = ref("");
   const completionTableIndex = new Map<string, { touched: number; tables: SqlCompletionTable[] }>();
   const completionObjectIndex = new Map<string, { touched: number; objects: SqlCompletionObject[] }>();
@@ -166,6 +175,7 @@ export const useConnectionStore = defineStore("connection", () => {
   const staleTreeRefreshIds = new Set<string>();
   let beforeConnectHandler: BeforeConnectHandler | null = null;
   let initFromDiskPromise: Promise<void> | null = null;
+  let completionCacheInvalidationSequence = 0;
 
   function startEditing(id: string) {
     editingConnectionId.value = id;
@@ -618,6 +628,68 @@ export const useConnectionStore = defineStore("connection", () => {
     for (const key of completionInFlight.keys()) {
       if (key.startsWith(cachePrefix)) completionInFlight.delete(key);
     }
+    completionCacheInvalidation.value = {
+      sequence: ++completionCacheInvalidationSequence,
+      connectionId,
+      ...(database == null ? {} : { database }),
+    };
+  }
+
+  function completionTableCacheKeyMatches(key: string, connectionId: string, database: string, tableName: string, schema?: string): boolean {
+    const prefix = `${connectionId}:${database}:`;
+    if (!key.startsWith(prefix)) return false;
+    const rest = key.slice(prefix.length);
+    const separator = rest.indexOf(":");
+    if (separator < 0) return false;
+    const keySchema = rest.slice(0, separator).toLowerCase();
+    const keyTable = rest.slice(separator + 1).toLowerCase();
+    if (keyTable !== tableName.toLowerCase()) return false;
+    return !schema || !keySchema || keySchema === schema.toLowerCase();
+  }
+
+  function completionTableIndexKeyMatches(key: string, connectionId: string, database: string, tableName: string, schema?: string, foreignKey = false): boolean {
+    const prefix = `${connectionId}:${database}:`;
+    if (!key.startsWith(prefix)) return false;
+    const parts = key.slice(prefix.length).split(":");
+    const keySchema = (parts[0] ?? "").toLowerCase();
+    const keyTable = (foreignKey ? parts[1] : (parts[1] ?? parts[0]))?.toLowerCase();
+    if (keyTable !== tableName.toLowerCase()) return false;
+    return !schema || !keySchema || keySchema === schema.toLowerCase();
+  }
+
+  function completionTableInFlightKeyMatches(key: string, connectionId: string, database: string, tableName: string, schema?: string): boolean {
+    if (!key.endsWith(":columns") && !key.endsWith(":fkeys")) return false;
+    const cacheKey = key.replace(/:(columns|fkeys)$/, "");
+    return completionTableCacheKeyMatches(cacheKey, connectionId, database, tableName, schema);
+  }
+
+  function invalidateTableCompletionCache(connectionId: string, database: string, tableName: string, schema?: string) {
+    if (!tableName) {
+      invalidateCompletionCache(connectionId, database);
+      return;
+    }
+    for (const key of Object.keys(completionColumnsCache.value)) {
+      if (completionTableCacheKeyMatches(key, connectionId, database, tableName, schema)) delete completionColumnsCache.value[key];
+    }
+    for (const key of Object.keys(completionForeignKeysCache.value)) {
+      if (completionTableCacheKeyMatches(key, connectionId, database, tableName, schema)) delete completionForeignKeysCache.value[key];
+    }
+    for (const key of completionColumnIndex.keys()) {
+      if (completionTableIndexKeyMatches(key, connectionId, database, tableName, schema)) completionColumnIndex.delete(key);
+    }
+    for (const key of completionForeignKeyIndex.keys()) {
+      if (completionTableIndexKeyMatches(key, connectionId, database, tableName, schema, true)) completionForeignKeyIndex.delete(key);
+    }
+    for (const key of completionInFlight.keys()) {
+      if (completionTableInFlightKeyMatches(key, connectionId, database, tableName, schema)) completionInFlight.delete(key);
+    }
+    completionCacheInvalidation.value = {
+      sequence: ++completionCacheInvalidationSequence,
+      connectionId,
+      database,
+      ...(schema == null ? {} : { schema }),
+      tableName,
+    };
   }
 
   async function removeConnections(ids: Iterable<string>) {
@@ -1725,6 +1797,15 @@ export const useConnectionStore = defineStore("connection", () => {
     return promise;
   }
 
+  async function loadCompletionMetadataFresh<T>(load: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const startedAtSequence = completionCacheInvalidationSequence;
+      const value = await load();
+      if (startedAtSequence === completionCacheInvalidationSequence || attempt === 2) return value;
+    }
+    return load();
+  }
+
   function completionNameSegments(name: string): string[] {
     return name
       .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -2150,7 +2231,7 @@ export const useConnectionStore = defineStore("connection", () => {
       await withCompletionInFlight(`${cacheKey}:columns`, async () => {
         await ensureConnected(connectionId);
         const querySchema = metadataQuerySchema(connectionId, database, schema);
-        completionColumnsCache.value[cacheKey] = await api.getColumns(connectionId, database, querySchema, table);
+        completionColumnsCache.value[cacheKey] = await loadCompletionMetadataFresh(() => api.getColumns(connectionId, database, querySchema, table));
         evictOldestCacheEntries(completionColumnsCache.value, COMPLETION_CACHE_MAX);
       });
     }
@@ -2179,7 +2260,7 @@ export const useConnectionStore = defineStore("connection", () => {
       await withCompletionInFlight(`${cacheKey}:fkeys`, async () => {
         await ensureConnected(connectionId);
         const querySchema = metadataQuerySchema(connectionId, database, schema);
-        completionForeignKeysCache.value[cacheKey] = await api.listForeignKeys(connectionId, database, querySchema, table);
+        completionForeignKeysCache.value[cacheKey] = await loadCompletionMetadataFresh(() => api.listForeignKeys(connectionId, database, querySchema, table));
         evictOldestCacheEntries(completionForeignKeysCache.value, COMPLETION_CACHE_MAX);
       });
     }
@@ -2657,6 +2738,7 @@ export const useConnectionStore = defineStore("connection", () => {
     treeSelectionAnchorId,
     treeClipboard,
     treeNodes,
+    completionCacheInvalidation,
     removeTreeNode,
     refreshAllTree,
     refreshTreeNode,
@@ -2711,6 +2793,8 @@ export const useConnectionStore = defineStore("connection", () => {
     loadIndexes,
     loadForeignKeys,
     loadTriggers,
+    invalidateCompletionCache,
+    invalidateTableCompletionCache,
     listCompletionTables,
     listCompletionObjects,
     listCompletionColumns,
