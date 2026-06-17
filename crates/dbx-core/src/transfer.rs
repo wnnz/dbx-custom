@@ -3320,6 +3320,7 @@ mod tests {
             port: 0,
             username: String::new(),
             password: String::new(),
+            sqlserver_auth_method: None,
             database: None,
             visible_databases: None,
             attached_databases: Vec::new(),

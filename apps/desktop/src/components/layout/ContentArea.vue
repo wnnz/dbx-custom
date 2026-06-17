@@ -2,7 +2,7 @@
 import { computed, ref, defineAsyncComponent, watch, nextTick, onMounted, onUnmounted } from "vue";
 import type { CSSProperties } from "vue";
 import { useI18n } from "vue-i18n";
-import { Check, Columns3, Loader2, Search, Bot, GitBranch, BarChart3, TableProperties, ChevronDown, ChevronUp, Inbox, RefreshCcw, Wrench, Toolbox, ListChecks, Database, FileUp, Download, X } from "@lucide/vue";
+import { Check, Columns3, Loader2, Search, Bot, GitBranch, BarChart3, TableProperties, ChevronDown, ChevronUp, Inbox, RefreshCcw, Wrench, Toolbox, ListChecks, Database, FileUp, Download } from "@lucide/vue";
 import { Splitpanes, Pane } from "splitpanes";
 import "splitpanes/dist/splitpanes.css";
 import { Button } from "@/components/ui/button";
@@ -45,7 +45,7 @@ import { useQueryStore } from "@/stores/queryStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useToast } from "@/composables/useToast";
 import { canCancelQueryExecution, queryExecutionLabelKey } from "@/lib/queryExecutionState";
-import { databaseDisplayNameForTab, executionSummaryItems, nextExecutionSummaryView, resultGridCacheKey, resultRunItems, tabularResultItems } from "@/lib/tabPresentation";
+import { databaseDisplayNameForTab, executionSummaryItems, nextExecutionSummaryView, resultGridCacheKey, resultRunHistoryItems, tabularResultItems } from "@/lib/tabPresentation";
 import { defaultQueryResultArchiveFileName } from "@/lib/queryResultArchive";
 import { saveQueryResultArchiveFile } from "@/lib/queryResultArchiveFile";
 import { isTableDataEditable } from "@/lib/tableEditing";
@@ -226,7 +226,7 @@ const activeQueryError = computed(() => {
 });
 const hasQueryOutput = computed(() => !!props.activeTab.result || !!props.activeTab.explainPlan || !!props.activeTab.explainError || props.activeTab.isExecuting === true || props.activeTab.isExplaining === true);
 const tabularResults = computed(() => tabularResultItems(props.activeTab.results));
-const resultRuns = computed(() => resultRunItems(props.activeTab));
+const resultRunHistory = computed(() => resultRunHistoryItems(props.activeTab));
 const activeResultGridCacheKey = computed(() => resultGridCacheKey(props.activeTab));
 const resultArchiveExporting = ref(false);
 const canExportResultArchive = computed(() => props.activeTab.mode === "query" && (!!props.activeTab.result || !!props.activeTab.results?.length || !!props.activeTab.resultRuns?.length));
@@ -469,10 +469,18 @@ function toggleExecutionSummary() {
   emit("update:activeOutputView", nextExecutionSummaryView(props.activeOutputView, canShowResultOutput.value));
 }
 
-function removeResultRun(runId: string) {
-  const removedActiveRun = props.activeTab.activeResultRunId === runId;
-  const removed = queryStore.removeResultRun(props.activeTab.id, runId);
-  if (removed && removedActiveRun) emit("update:activeOutputView", "result");
+function selectResultRun(runId: string) {
+  if (queryStore.setActiveResultRun(props.activeTab.id, runId)) {
+    emit("update:activeOutputView", "result");
+  }
+}
+
+function formatResultRunTime(createdAt: number): string {
+  return new Date(createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function resultRunSqlPreview(sql: string): string {
+  return sql.trim().replace(/\s+/g, " ").slice(0, 90) || "-";
 }
 
 function handleModRTarget(target: Element): boolean {
@@ -537,26 +545,33 @@ defineExpose({ focusSearch, refreshData, handleModRTarget });
                   {{ t("tabs.tableData") }}
                 </Button>
               </div>
-              <template v-if="resultRuns.length > 0">
+              <template v-if="resultRunHistory.length > 0">
                 <span class="mx-1 h-4 w-px shrink-0 bg-border" />
-                <div class="flex min-w-0 max-w-[35%] items-center gap-1 overflow-x-auto overflow-y-hidden px-1" :aria-label="t('tabs.resultRuns')">
-                  <div v-for="run in resultRuns" :key="run.id" class="inline-flex shrink-0 items-center">
-                    <Button
-                      size="sm"
-                      :variant="run.active ? 'default' : 'ghost'"
-                      class="h-6 rounded-r-none px-2 text-xs"
-                      @click="
-                        queryStore.setActiveResultRun(activeTab.id, run.id);
-                        emit('update:activeOutputView', 'result');
-                      "
-                    >
-                      {{ t("tabs.runN", { n: run.sequence }) }}
+                <DropdownMenu>
+                  <DropdownMenuTrigger as-child>
+                    <Button size="sm" variant="ghost" class="h-6 shrink-0 gap-1 px-2 text-xs">
+                      {{ t("tabs.resultHistory") }}
+                      <ChevronDown class="h-3.5 w-3.5" />
                     </Button>
-                    <Button size="icon" :variant="run.active ? 'default' : 'ghost'" class="h-6 w-6 rounded-l-none border-l border-border/50 px-0" :title="t('tabs.removeRun', { n: run.sequence })" :aria-label="t('tabs.removeRun', { n: run.sequence })" @click.stop="removeResultRun(run.id)">
-                      <X class="h-3 w-3" />
-                    </Button>
-                  </div>
-                </div>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" class="w-80 max-w-[calc(100vw-2rem)] gap-0 overflow-hidden rounded-xl border bg-popover p-0 text-popover-foreground shadow-xl">
+                    <div class="border-b bg-muted/40 px-3 py-2">
+                      <div class="text-xs font-semibold">{{ t("tabs.resultHistory") }}</div>
+                    </div>
+                    <div class="p-1">
+                      <DropdownMenuItem v-for="run in resultRunHistory" :key="run.id" class="grid grid-cols-[1rem_minmax(0,1fr)] gap-2 py-2" @click="selectResultRun(run.id)">
+                        <Check class="mt-0.5 h-3.5 w-3.5" :class="run.active ? 'text-primary' : 'text-transparent'" />
+                        <span class="min-w-0">
+                          <span class="flex min-w-0 items-center justify-between gap-2 text-xs">
+                            <span class="font-medium">{{ t("tabs.runN", { n: run.sequence }) }}</span>
+                            <span class="shrink-0 text-[11px] text-muted-foreground tabular-nums">{{ formatResultRunTime(run.createdAt) }}</span>
+                          </span>
+                          <span class="block truncate font-mono text-[11px] text-muted-foreground">{{ resultRunSqlPreview(run.sql) }}</span>
+                        </span>
+                      </DropdownMenuItem>
+                    </div>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </template>
               <template v-if="tabularResults.length > 1">
                 <span class="mx-1 h-4 w-px shrink-0 bg-border" />

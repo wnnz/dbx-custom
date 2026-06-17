@@ -20,6 +20,7 @@ fn postgres_test_config(id: &str, database: &str) -> ConnectionConfig {
         port: 5432,
         username: "postgres".to_string(),
         password: String::new(),
+        sqlserver_auth_method: None,
         database: Some(database.to_string()),
         visible_databases: None,
         attached_databases: Vec::new(),

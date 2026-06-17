@@ -566,6 +566,7 @@ impl AppState {
                     port,
                     &db_config.username,
                     &db_config.password,
+                    db_config.sqlserver_uses_windows_auth(),
                     db_config.database.as_deref(),
                     connect_timeout,
                 )
@@ -1529,6 +1530,7 @@ mod tests {
             port: 3306,
             username: "root".to_string(),
             password: "secret".to_string(),
+            sqlserver_auth_method: None,
             database: database.map(str::to_string),
             visible_databases: None,
             attached_databases: Vec::new(),

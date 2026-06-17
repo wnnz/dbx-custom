@@ -17,6 +17,8 @@ pub struct ConnectionConfig {
     pub port: u16,
     pub username: String,
     pub password: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sqlserver_auth_method: Option<String>,
     pub database: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_databases: Option<Vec<String>>,
@@ -318,6 +320,8 @@ struct ConnectionConfigData {
     pub port: u16,
     pub username: String,
     pub password: String,
+    #[serde(default)]
+    pub sqlserver_auth_method: Option<String>,
     pub database: Option<String>,
     #[serde(default)]
     pub visible_databases: Option<Vec<String>>,
@@ -394,6 +398,7 @@ impl From<ConnectionConfigData> for ConnectionConfig {
             port: data.port,
             username: data.username,
             password: data.password,
+            sqlserver_auth_method: data.sqlserver_auth_method,
             database: data.database,
             visible_databases: data.visible_databases,
             attached_databases: data.attached_databases,
@@ -542,6 +547,11 @@ fn copy_u64(
 }
 
 impl ConnectionConfig {
+    pub fn sqlserver_uses_windows_auth(&self) -> bool {
+        self.db_type == DatabaseType::SqlServer
+            && self.sqlserver_auth_method.as_deref().is_some_and(|method| method.eq_ignore_ascii_case("windows"))
+    }
+
     pub fn effective_transport_layers(&self) -> Vec<TransportLayerConfig> {
         self.transport_layers.iter().filter(|layer| layer.enabled()).cloned().collect()
     }
@@ -1414,6 +1424,7 @@ mod tests {
             port: 2883,
             username: username.to_string(),
             password: password.to_string(),
+            sqlserver_auth_method: None,
             database: database.map(str::to_string),
             visible_databases: None,
             attached_databases: Vec::new(),

@@ -182,6 +182,7 @@ mod tests {
             port: 27017,
             username: "mongouser".to_string(),
             password: "secret".to_string(),
+            sqlserver_auth_method: None,
             database: Some("RestCloud_V45PUB_Gateway".to_string()),
             visible_databases: None,
             attached_databases: Vec::new(),
@@ -406,6 +407,7 @@ pub async fn test_connection(state: State<'_, Arc<AppState>>, config: Connection
                 port,
                 &config.username,
                 &config.password,
+                config.sqlserver_uses_windows_auth(),
                 config.database.as_deref(),
                 connect_timeout,
             )
@@ -634,6 +636,7 @@ pub async fn connect_db(state: State<'_, Arc<AppState>>, config: ConnectionConfi
                 port,
                 &db_config.username,
                 &db_config.password,
+                db_config.sqlserver_uses_windows_auth(),
                 db_config.database.as_deref(),
                 connect_timeout,
             )

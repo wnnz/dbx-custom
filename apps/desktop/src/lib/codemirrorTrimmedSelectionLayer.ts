@@ -1,7 +1,6 @@
 import { layer, RectangleMarker, type EditorView } from "@codemirror/view";
 
 const MIN_EMPTY_LINE_WIDTH = 14;
-const END_OF_LINE_PADDING = 3;
 const CONTIGUOUS_LINE_GAP = 1.5;
 const CORNER_COVERAGE_GAP = 1;
 
@@ -33,7 +32,7 @@ function layerBase(view: EditorView) {
   };
 }
 
-function markerForLineRange(view: EditorView, from: number, to: number, lineFrom: number, lineTo: number, includesLineBreak: boolean, base: { left: number; top: number }): TrimmedSelectionRect | null {
+function markerForLineRange(view: EditorView, from: number, to: number, lineFrom: number, lineTo: number, base: { left: number; top: number }): TrimmedSelectionRect | null {
   const start = view.coordsAtPos(from, 1);
   const end = from < to ? view.coordsAtPos(to, -1) : start;
   const lineStart = view.coordsAtPos(lineFrom, 1) ?? start;
@@ -41,10 +40,7 @@ function markerForLineRange(view: EditorView, from: number, to: number, lineFrom
   if (!start || !end || !lineStart || !lineEnd) return null;
 
   const left = from < to ? Math.min(start.left, end.left) : lineStart.left;
-  let right = from < to ? Math.max(start.right, end.right) : left + MIN_EMPTY_LINE_WIDTH;
-  if (includesLineBreak && to >= lineTo) {
-    right = Math.max(right, lineEnd.right + END_OF_LINE_PADDING);
-  }
+  const right = from < to ? Math.max(start.right, end.right) : left + MIN_EMPTY_LINE_WIDTH;
 
   const { top, bottom } = visualLineVerticalBounds(view, start, end);
 
@@ -81,12 +77,12 @@ function lastPositionOnVisualLine(view: EditorView, from: number, to: number, st
   return best > from ? best : Math.min(to, from + 1);
 }
 
-function markerRectsForLineRange(view: EditorView, from: number, to: number, lineFrom: number, lineTo: number, includesLineBreak: boolean, base: { left: number; top: number }): TrimmedSelectionRect[] {
+function markerRectsForLineRange(view: EditorView, from: number, to: number, lineFrom: number, lineTo: number, base: { left: number; top: number }): TrimmedSelectionRect[] {
   const start = view.coordsAtPos(from, 1);
   const end = from < to ? view.coordsAtPos(to, -1) : start;
   if (!start || !end) return [];
   if (from >= to || sameVisualLine(start, end)) {
-    const rect = markerForLineRange(view, from, to, lineFrom, lineTo, includesLineBreak, base);
+    const rect = markerForLineRange(view, from, to, lineFrom, lineTo, base);
     return rect ? [rect] : [];
   }
 
@@ -96,7 +92,7 @@ function markerRectsForLineRange(view: EditorView, from: number, to: number, lin
     const segmentStart = view.coordsAtPos(segmentFrom, 1);
     if (!segmentStart) break;
     const segmentTo = lastPositionOnVisualLine(view, segmentFrom, to, segmentStart);
-    const rect = markerForLineRange(view, segmentFrom, segmentTo, lineFrom, lineTo, includesLineBreak && segmentTo >= to, base);
+    const rect = markerForLineRange(view, segmentFrom, segmentTo, lineFrom, lineTo, base);
     if (rect) rects.push(rect);
     if (segmentTo <= segmentFrom) break;
     segmentFrom = segmentTo;
@@ -147,8 +143,7 @@ export function trimmedSelectionLayer() {
             const line = view.state.doc.lineAt(pos);
             const from = Math.max(pos, line.from);
             const to = Math.min(endPos, line.to);
-            const includesLineBreak = endPos > line.to && range.to > line.to;
-            rects.push(...markerRectsForLineRange(view, from, to, line.from, line.to, includesLineBreak, base));
+            rects.push(...markerRectsForLineRange(view, from, to, line.from, line.to, base));
 
             const next = line.to + 1;
             if (next <= pos) break;

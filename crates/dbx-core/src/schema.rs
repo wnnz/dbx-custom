@@ -638,6 +638,7 @@ mod tests {
             port: 5432,
             username: "user".to_string(),
             password: "secret".to_string(),
+            sqlserver_auth_method: None,
             database: Some("demo".to_string()),
             visible_databases: None,
             attached_databases: Vec::new(),
@@ -2047,6 +2048,31 @@ mod ddl_tests {
     }
 
     #[test]
+    fn sqlserver_table_ddl_includes_table_and_column_comments() {
+        let mut display_name = column("display_name", "nvarchar(100)");
+        display_name.comment = Some("User's display name".to_string());
+        let columns = vec![display_name];
+
+        let ddl = render_sqlserver_table_ddl("dbo", "users", Some("User table"), &columns, &[], &[]);
+
+        assert!(ddl.contains("@level0type=N'SCHEMA', @level0name=N'dbo', @level1type=N'TABLE', @level1name=N'users';"));
+        assert!(ddl.contains("@value=N'User table'"));
+        assert!(ddl.contains("@level2type=N'COLUMN', @level2name=N'display_name';"));
+        assert!(ddl.contains("@value=N'User''s display name'"));
+    }
+
+    #[test]
+    fn sqlserver_table_ddl_omits_extended_properties_without_comments() {
+        let mut id = column("id", "int");
+        id.is_primary_key = true;
+        let columns = vec![id];
+
+        let ddl = render_sqlserver_table_ddl("dbo", "users", None, &columns, &[], &[]);
+
+        assert!(!ddl.contains("sp_addextendedproperty"));
+    }
+
+    #[test]
     fn opengauss_table_ddl_uses_native_tabledef_function() {
         assert_eq!(
             opengauss_table_ddl_sql("tenant's schema", "active users"),
@@ -2193,7 +2219,19 @@ pub async fn build_sqlserver_ddl(
     let columns = db::sqlserver::get_columns(client, schema, table).await?;
     let indexes = db::sqlserver::list_indexes(client, schema, table).await?;
     let fkeys = db::sqlserver::list_foreign_keys(client, schema, table).await?;
+    let table_comment = db::sqlserver::get_table_comment(client, schema, table).await?;
 
+    Ok(render_sqlserver_table_ddl(schema, table, table_comment.as_deref(), &columns, &indexes, &fkeys))
+}
+
+pub fn render_sqlserver_table_ddl(
+    schema: &str,
+    table: &str,
+    table_comment: Option<&str>,
+    columns: &[db::ColumnInfo],
+    indexes: &[db::IndexInfo],
+    fkeys: &[db::ForeignKeyInfo],
+) -> String {
     let mut ddl = format!("CREATE TABLE [{schema}].[{table}] (\n");
     let col_lines: Vec<String> = columns
         .iter()
@@ -2217,7 +2255,7 @@ pub async fn build_sqlserver_ddl(
             pks.iter().map(|k| format!("[{k}]")).collect::<Vec<_>>().join(", ")
         ));
     }
-    for fk in &fkeys {
+    for fk in fkeys {
         ddl.push_str(&format!(
             ",\n  CONSTRAINT [{}] FOREIGN KEY ([{}]) REFERENCES [{}]([{}])",
             fk.name, fk.column, fk.ref_table, fk.ref_column
@@ -2225,7 +2263,7 @@ pub async fn build_sqlserver_ddl(
     }
     ddl.push_str("\n);\n");
 
-    for idx in &indexes {
+    for idx in indexes {
         if idx.is_primary {
             continue;
         }
@@ -2244,5 +2282,31 @@ pub async fn build_sqlserver_ddl(
             idx.name
         ));
     }
-    Ok(ddl)
+    if let Some(comment) = table_comment.filter(|comment| !comment.is_empty()) {
+        ddl.push_str(&sqlserver_extended_property_sql(schema, table, None, comment));
+    }
+    for col in columns {
+        if let Some(comment) = col.comment.as_deref().filter(|comment| !comment.is_empty()) {
+            ddl.push_str(&sqlserver_extended_property_sql(schema, table, Some(&col.name), comment));
+        }
+    }
+    ddl
+}
+
+fn sqlserver_string(value: &str) -> String {
+    format!("N'{}'", value.replace('\'', "''"))
+}
+
+fn sqlserver_extended_property_sql(schema: &str, table: &str, column: Option<&str>, comment: &str) -> String {
+    let mut sql = format!(
+        "\nEXEC sys.sp_addextendedproperty @name=N'MS_Description', @value={}, @level0type=N'SCHEMA', @level0name={}, @level1type=N'TABLE', @level1name={}",
+        sqlserver_string(comment),
+        sqlserver_string(schema),
+        sqlserver_string(table)
+    );
+    if let Some(column) = column {
+        sql.push_str(&format!(", @level2type=N'COLUMN', @level2name={}", sqlserver_string(column)));
+    }
+    sql.push(';');
+    sql
 }

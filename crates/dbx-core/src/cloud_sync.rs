@@ -559,6 +559,7 @@ mod tests {
             port: 5432,
             username: "user".to_string(),
             password: "secret".to_string(),
+            sqlserver_auth_method: None,
             database: None,
             visible_databases: None,
             attached_databases: Vec::new(),

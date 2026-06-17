@@ -1,16 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import {
-  activeResultRun,
-  databaseDisplayNameForTab,
-  executionSummaryItems,
-  nextExecutionSummaryView,
-  resultGridCacheKey,
-  resultRunItems,
-  tabDisplayTitle,
-  tabularResultItems,
-} from "../../apps/desktop/src/lib/tabPresentation.ts";
+import { activeResultRun, databaseDisplayNameForTab, executionSummaryItems, nextExecutionSummaryView, resultGridCacheKey, resultRunHistoryItems, resultRunItems, tabDisplayTitle, tabularResultItems } from "../../apps/desktop/src/lib/tabPresentation.ts";
 import { useConnectionStore } from "../../apps/desktop/src/stores/connectionStore.ts";
 import type { ConnectionConfig, QueryResult, QueryTab } from "../../apps/desktop/src/types/database.ts";
 
@@ -155,7 +146,38 @@ test("result run items expose ordered labels and active state", () => {
     { id: "run-2", title: "Run 2", sequence: 2, active: true },
   ]);
   assert.equal(activeResultRun(tab)?.id, "run-2");
-  assert.deepEqual(resultRunItems(queryTab()).map((item) => item.title), []);
+  assert.deepEqual(
+    resultRunItems(queryTab()).map((item) => item.title),
+    [],
+  );
+});
+
+test("result run history items show latest five runs newest first", () => {
+  const tab = queryTab({
+    activeResultRunId: "run-5",
+    resultRuns: Array.from({ length: 6 }, (_, index) => {
+      const sequence = index + 1;
+      return {
+        id: `run-${sequence}`,
+        title: `Run ${sequence}`,
+        sequence,
+        sql: `select ${sequence}`,
+        createdAt: sequence * 10,
+        result: result([`col_${sequence}`]),
+      };
+    }),
+  });
+
+  assert.deepEqual(
+    resultRunHistoryItems(tab).map((item) => ({ id: item.id, sequence: item.sequence, sql: item.sql, active: item.active })),
+    [
+      { id: "run-6", sequence: 6, sql: "select 6", active: false },
+      { id: "run-5", sequence: 5, sql: "select 5", active: true },
+      { id: "run-4", sequence: 4, sql: "select 4", active: false },
+      { id: "run-3", sequence: 3, sql: "select 3", active: false },
+      { id: "run-2", sequence: 2, sql: "select 2", active: false },
+    ],
+  );
 });
 
 test("result grid cache key includes result run id and statement result index", () => {

@@ -38,12 +38,13 @@ pub async fn connect(
     port: u16,
     user: &str,
     pass: &str,
+    windows_auth: bool,
     database: Option<&str>,
     timeout: Duration,
 ) -> Result<SqlServerClient, String> {
-    match try_connect(host, port, user, pass, database, true, timeout).await {
+    match try_connect(host, port, user, pass, windows_auth, database, true, timeout).await {
         Ok(client) => Ok(client),
-        Err(_) => try_connect(host, port, user, pass, database, false, timeout).await,
+        Err(_) => try_connect(host, port, user, pass, windows_auth, database, false, timeout).await,
     }
 }
 
@@ -52,6 +53,7 @@ async fn try_connect(
     port: u16,
     user: &str,
     pass: &str,
+    windows_auth: bool,
     database: Option<&str>,
     use_encryption: bool,
     timeout: Duration,
@@ -64,7 +66,7 @@ async fn try_connect(
     } else {
         config.port(port);
     }
-    config.authentication(AuthMethod::sql_server(user, pass));
+    config.authentication(sqlserver_auth_method(user, pass, windows_auth)?);
     if let Some(db) = database {
         config.database(db);
     }
@@ -88,6 +90,27 @@ async fn try_connect(
         .await
         .map_err(|_| format!("SQL Server handshake timed out ({}s)", timeout.as_secs()))?
         .map_err(|e| format!("SQL Server connection failed: {e}"))
+}
+
+fn sqlserver_auth_method(user: &str, pass: &str, windows_auth: bool) -> Result<AuthMethod, String> {
+    if !windows_auth {
+        return Ok(AuthMethod::sql_server(user, pass));
+    }
+
+    #[cfg(windows)]
+    {
+        if user.trim().is_empty() && pass.is_empty() {
+            Ok(AuthMethod::Integrated)
+        } else {
+            Ok(AuthMethod::windows(user, pass))
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = (user, pass);
+        Err("SQL Server Windows authentication requires a Windows build.".to_string())
+    }
 }
 
 fn row_to_json(row: &tiberius::Row) -> Vec<serde_json::Value> {

@@ -124,6 +124,20 @@ export function activeResultRun(tab: Pick<QueryTab, "resultRuns" | "activeResult
   return tab.resultRuns?.find((run) => run.id === tab.activeResultRunId);
 }
 
+export function resultRunHistoryItems(tab: Pick<QueryTab, "resultRuns" | "activeResultRunId">, limit = 5): { id: string; title: string; sequence: number; sql: string; createdAt: number; active: boolean }[] {
+  return [...(tab.resultRuns ?? [])]
+    .sort((a, b) => b.createdAt - a.createdAt || b.sequence - a.sequence)
+    .slice(0, limit)
+    .map((run) => ({
+      id: run.id,
+      title: run.title,
+      sequence: run.sequence,
+      sql: run.sql,
+      createdAt: run.createdAt,
+      active: run.id === tab.activeResultRunId,
+    }));
+}
+
 export function resultRunItems(tab: Pick<QueryTab, "resultRuns" | "activeResultRunId">): { id: string; title: string; sequence: number; active: boolean }[] {
   return (tab.resultRuns ?? []).map((run) => ({
     id: run.id,

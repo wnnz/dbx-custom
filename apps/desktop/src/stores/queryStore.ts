@@ -260,6 +260,8 @@ export const useQueryStore = defineStore("query", () => {
     return (tab.resultRuns?.reduce((max, run) => Math.max(max, run.sequence), 0) ?? 0) + 1;
   }
 
+  const MAX_RESULT_RUNS = 5;
+
   function captureDisplayedResultRun(tab: QueryTab, sql: string, createdAt = Date.now()) {
     if (tab.mode !== "query" || !tab.result) return;
     const sequence = nextResultRunSequence(tab);
@@ -294,7 +296,7 @@ export const useQueryStore = defineStore("query", () => {
       queryEditabilityReason: tab.queryEditabilityReason,
       tableMeta: tab.tableMeta,
     };
-    tab.resultRuns = [...(tab.resultRuns ?? []), run];
+    tab.resultRuns = [...(tab.resultRuns ?? []), run].slice(-MAX_RESULT_RUNS);
     tab.activeResultRunId = run.id;
   }
 

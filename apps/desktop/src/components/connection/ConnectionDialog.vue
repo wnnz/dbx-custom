@@ -106,6 +106,7 @@ const defaultForm = (): ConnectionForm => ({
   port: 3306,
   username: "root",
   password: "",
+  sqlserver_auth_method: "sqlserver",
   database: undefined,
   color: "",
   transport_layers: [],
@@ -527,6 +528,7 @@ function applyProfile(val: string, preserveConnectionFields = false) {
   if (!preserveConnectionFields) {
     form.value.port = profile.port;
     form.value.username = profile.user;
+    form.value.sqlserver_auth_method = profile.type === "sqlserver" ? form.value.sqlserver_auth_method || "sqlserver" : undefined;
     form.value.url_params = profile.urlParams || "";
     if (profile.host) {
       form.value.host = profile.host;
@@ -585,6 +587,7 @@ watch(
         port: profile === "tdengine" && (config.port === 0 || config.port === 6030) ? 6041 : config.port,
         username: config.username,
         password: config.password,
+        sqlserver_auth_method: config.sqlserver_auth_method || "sqlserver",
         database: config.database,
         color: config.color || "",
         transport_layers: transportLayersForConfig(legacyConfig),
@@ -1118,6 +1121,11 @@ function connectionConfigForSubmit(id: string): ConnectionConfig {
   config.keepalive_interval_secs = Number.isFinite(keepaliveInterval) && keepaliveInterval >= 0 ? keepaliveInterval : 0;
   if (config.db_type === "manticoresearch") {
     config.url_params = "";
+  }
+  if (config.db_type === "sqlserver") {
+    config.sqlserver_auth_method = config.sqlserver_auth_method === "windows" ? "windows" : "sqlserver";
+  } else {
+    config.sqlserver_auth_method = undefined;
   }
   if (!config.one_time) config.one_time = undefined;
   if (!config.read_only) config.read_only = undefined;
@@ -2644,14 +2652,27 @@ function openExternalUrl(url: string) {
                     <Input v-model="form.gbase_server" class="col-span-3" placeholder="gbase01" />
                   </div>
 
+                  <div v-if="form.db_type === 'sqlserver'" class="grid grid-cols-4 items-center gap-4">
+                    <Label class="text-right text-xs">{{ t("connection.authMethod") }}</Label>
+                    <Select v-model="form.sqlserver_auth_method">
+                      <SelectTrigger class="col-span-3 h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="sqlserver">{{ t("connection.sqlServerAuth") }}</SelectItem>
+                        <SelectItem value="windows">{{ t("connection.windowsAuth") }}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.user") }}</Label>
-                    <Input v-model="form.username" class="col-span-3" />
+                    <Label class="text-right">{{ form.db_type === "sqlserver" && form.sqlserver_auth_method === "windows" ? t("connection.windowsUser") : t("connection.user") }}</Label>
+                    <Input v-model="form.username" class="col-span-3" :placeholder="form.db_type === 'sqlserver' && form.sqlserver_auth_method === 'windows' ? t('connection.currentWindowsUser') : ''" />
                   </div>
 
                   <div class="grid grid-cols-4 items-center gap-4">
                     <Label class="text-right">{{ t("connection.password") }}</Label>
-                    <PasswordInput v-model="form.password" class="col-span-3" />
+                    <PasswordInput v-model="form.password" class="col-span-3" :placeholder="form.db_type === 'sqlserver' && form.sqlserver_auth_method === 'windows' ? t('connection.currentWindowsUserPassword') : ''" />
                   </div>
 
                   <div class="grid grid-cols-4 items-center gap-4">

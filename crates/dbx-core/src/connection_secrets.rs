@@ -484,6 +484,7 @@ mod tests {
             port: 5432,
             username: "postgres".to_string(),
             password: password.to_string(),
+            sqlserver_auth_method: None,
             database: Some("postgres".to_string()),
             visible_databases: None,
             attached_databases: Vec::new(),

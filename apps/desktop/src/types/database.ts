@@ -72,6 +72,7 @@ export interface ConnectionConfig {
   port: number;
   username: string;
   password: string;
+  sqlserver_auth_method?: "sqlserver" | "windows";
   database?: string;
   visible_databases?: string[];
   attached_databases?: AttachedDatabaseConfig[];
